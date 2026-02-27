@@ -6,7 +6,8 @@ import process from 'node:process';
 // Constants
 // ============================================================================
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const KIMI_API_URL = 'https://api.moonshot.cn/v1/chat/completions';
+const KIMI_DEFAULT_MODEL = 'kimi-k2.5';
 const OPENAI_DEFAULT_API_BASE = 'https://api.openai.com/v1';
 const OPENAI_DEFAULT_MODEL = 'gpt-4o-mini';
 const FEED_FETCH_TIMEOUT_MS = 15_000;
@@ -363,35 +364,47 @@ async function fetchAllFeeds(feeds: typeof RSS_FEEDS): Promise<Article[]> {
 }
 
 // ============================================================================
-// AI Providers (Gemini + OpenAI-compatible fallback)
+// AI Providers (Kimi + OpenAI-compatible fallback)
 // ============================================================================
 
 async function callGemini(prompt: string, apiKey: string): Promise<string> {
-  const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
+  const response = await fetch(KIMI_API_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.3,
-        topP: 0.8,
-        topK: 40,
-      },
+      model: KIMI_DEFAULT_MODEL,
+      messages: [{ role: 'user', content: prompt }],
+      // kimi-k2.5 currently only accepts temperature=1.
+      temperature: 1,
+      top_p: 0.95,
     }),
   });
   
   if (!response.ok) {
     const errorText = await response.text().catch(() => 'Unknown error');
-    throw new Error(`Gemini API error (${response.status}): ${errorText}`);
+    throw new Error(`Kimi API error (${response.status}): ${errorText}`);
   }
   
   const data = await response.json() as {
-    candidates?: Array<{
-      content?: { parts?: Array<{ text?: string }> };
+    choices?: Array<{
+      message?: {
+        content?: string | Array<{ type?: string; text?: string }>;
+      };
     }>;
   };
-  
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+  const content = data.choices?.[0]?.message?.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter(item => item.type === 'text' && typeof item.text === 'string')
+      .map(item => item.text)
+      .join('\n');
+  }
+  return '';
 }
 
 async function callOpenAICompatible(
@@ -446,17 +459,17 @@ function inferOpenAIModel(apiBase: string): string {
 }
 
 function createAIClient(config: {
-  geminiApiKey?: string;
+  kimiApiKey?: string;
   openaiApiKey?: string;
   openaiApiBase?: string;
   openaiModel?: string;
 }): AIClient {
   const state = {
-    geminiApiKey: config.geminiApiKey?.trim() || '',
+    kimiApiKey: config.kimiApiKey?.trim() || '',
     openaiApiKey: config.openaiApiKey?.trim() || '',
     openaiApiBase: (config.openaiApiBase?.trim() || OPENAI_DEFAULT_API_BASE).replace(/\/+$/, ''),
     openaiModel: config.openaiModel?.trim() || '',
-    geminiEnabled: Boolean(config.geminiApiKey?.trim()),
+    kimiEnabled: Boolean(config.kimiApiKey?.trim()),
     fallbackLogged: false,
   };
 
@@ -466,17 +479,17 @@ function createAIClient(config: {
 
   return {
     async call(prompt: string): Promise<string> {
-      if (state.geminiEnabled && state.geminiApiKey) {
+      if (state.kimiEnabled && state.kimiApiKey) {
         try {
-          return await callGemini(prompt, state.geminiApiKey);
+          return await callGemini(prompt, state.kimiApiKey);
         } catch (error) {
           if (state.openaiApiKey) {
             if (!state.fallbackLogged) {
               const reason = error instanceof Error ? error.message : String(error);
-              console.warn(`[digest] Gemini failed, switching to OpenAI-compatible fallback (${state.openaiApiBase}, model=${state.openaiModel}). Reason: ${reason}`);
+              console.warn(`[digest] Kimi failed, switching to OpenAI-compatible fallback (${state.openaiApiBase}, model=${state.openaiModel}). Reason: ${reason}`);
               state.fallbackLogged = true;
             }
-            state.geminiEnabled = false;
+            state.kimiEnabled = false;
             return callOpenAICompatible(prompt, state.openaiApiKey, state.openaiApiBase, state.openaiModel);
           }
           throw error;
@@ -487,7 +500,7 @@ function createAIClient(config: {
         return callOpenAICompatible(prompt, state.openaiApiKey, state.openaiApiBase, state.openaiModel);
       }
 
-      throw new Error('No AI API key configured. Set GEMINI_API_KEY and/or OPENAI_API_KEY.');
+      throw new Error('No AI API key configured. Set KIMI_API_KEY and/or OPENAI_API_KEY.');
     },
   };
 }
@@ -1012,7 +1025,7 @@ Options:
   --help          Show this help
 
 Environment:
-  GEMINI_API_KEY   Optional but recommended. Get one at https://aistudio.google.com/apikey
+  KIMI_API_KEY     Optional but recommended. Get one at https://platform.moonshot.cn/console/api-keys
   OPENAI_API_KEY   Optional fallback key for OpenAI-compatible APIs
   OPENAI_API_BASE  Optional fallback base URL (default: https://api.openai.com/v1)
   OPENAI_MODEL     Optional fallback model (default: deepseek-chat for DeepSeek base, else gpt-4o-mini)
@@ -1046,19 +1059,19 @@ async function main(): Promise<void> {
     }
   }
   
-  const geminiApiKey = process.env.GEMINI_API_KEY;
+  const kimiApiKey = process.env.KIMI_API_KEY;
   const openaiApiKey = process.env.OPENAI_API_KEY;
   const openaiApiBase = process.env.OPENAI_API_BASE;
   const openaiModel = process.env.OPENAI_MODEL;
 
-  if (!geminiApiKey && !openaiApiKey) {
-    console.error('[digest] Error: Missing API key. Set GEMINI_API_KEY and/or OPENAI_API_KEY.');
-    console.error('[digest] Gemini key: https://aistudio.google.com/apikey');
+  if (!kimiApiKey && !openaiApiKey) {
+    console.error('[digest] Error: Missing API key. Set KIMI_API_KEY and/or OPENAI_API_KEY.');
+    console.error('[digest] Kimi key: https://platform.moonshot.cn/console/api-keys');
     process.exit(1);
   }
 
   const aiClient = createAIClient({
-    geminiApiKey,
+    kimiApiKey,
     openaiApiKey,
     openaiApiBase,
     openaiModel,
@@ -1074,7 +1087,7 @@ async function main(): Promise<void> {
   console.log(`[digest] Top N: ${topN}`);
   console.log(`[digest] Language: ${lang}`);
   console.log(`[digest] Output: ${outputPath}`);
-  console.log(`[digest] AI provider: ${geminiApiKey ? 'Gemini (primary)' : 'OpenAI-compatible (primary)'}`);
+  console.log(`[digest] AI provider: ${kimiApiKey ? `Kimi (${KIMI_DEFAULT_MODEL}, primary)` : 'OpenAI-compatible (primary)'}`);
   if (openaiApiKey) {
     const resolvedBase = (openaiApiBase?.trim() || OPENAI_DEFAULT_API_BASE).replace(/\/+$/, '');
     const resolvedModel = openaiModel?.trim() || inferOpenAIModel(resolvedBase);
@@ -1160,7 +1173,10 @@ async function main(): Promise<void> {
     lang,
   });
   
-  await mkdir(dirname(outputPath), { recursive: true });
+  const outputDir = dirname(outputPath);
+  if (outputDir && outputDir !== '.') {
+    await mkdir(outputDir, { recursive: true });
+  }
   await writeFile(outputPath, report);
   
   console.log('');

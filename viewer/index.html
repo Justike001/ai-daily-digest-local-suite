@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Daily Digest</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <aside class="sidebar">
+        <h1>AI Daily Digest</h1>
+        <p class="subtle">每日技术情报阅读站</p>
+        <button id="refreshBtn" type="button">刷新日报列表</button>
+        <ul id="reportList"></ul>
+      </aside>
+
+      <section class="content">
+        <header class="topbar">
+          <h2 id="title">请选择一份日报</h2>
+          <div class="meta">
+            <span id="metaDate">-</span>
+            <span id="metaWords">-</span>
+          </div>
+        </header>
+
+        <article id="reportContent" class="report-body">
+          <p class="empty">加载后将在这里展示解析后的日报内容。</p>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      const listEl = document.getElementById("reportList");
+      const contentEl = document.getElementById("reportContent");
+      const titleEl = document.getElementById("title");
+      const refreshBtn = document.getElementById("refreshBtn");
+      const metaDateEl = document.getElementById("metaDate");
+      const metaWordsEl = document.getElementById("metaWords");
+
+      function escapeHtml(text) {
+        return text
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;");
+      }
+
+      function parseInline(text) {
+        let out = escapeHtml(text);
+        out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
+        out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+        out = out.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+        out = out.replace(
+          /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+          '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+        );
+        return out;
+      }
+
+      function parseMarkdown(md) {
+        const lines = md.replace(/\r\n/g, "\n").split("\n");
+        const html = [];
+        let i = 0;
+        let inCode = false;
+        let codeLang = "";
+        let codeLines = [];
+        let inUl = false;
+        let inOl = false;
+        let inQuote = false;
+
+        function closeListsAndQuote() {
+          if (inUl) {
+            html.push("</ul>");
+            inUl = false;
+          }
+          if (inOl) {
+            html.push("</ol>");
+            inOl = false;
+          }
+          if (inQuote) {
+            html.push("</blockquote>");
+            inQuote = false;
+          }
+        }
+
+        function isTableHeader(idx) {
+          if (idx + 1 >= lines.length) return false;
+          const a = lines[idx];
+          const b = lines[idx + 1];
+          return a.includes("|") && /^\s*\|?[\s:-|]+\|?\s*$/.test(b);
+        }
+
+        function parseTable(idx) {
+          const headers = lines[idx]
+            .split("|")
+            .map((v) => v.trim())
+            .filter(Boolean);
+          const rows = [];
+          let j = idx + 2;
+          while (j < lines.length && lines[j].includes("|")) {
+            const cells = lines[j]
+              .split("|")
+              .map((v) => v.trim())
+              .filter(Boolean);
+            if (cells.length === 0) break;
+            rows.push(cells);
+            j++;
+          }
+          let out = "<div class=\"table-wrap\"><table><thead><tr>";
+          for (const h of headers) out += `<th>${parseInline(h)}</th>`;
+          out += "</tr></thead><tbody>";
+          for (const row of rows) {
+            out += "<tr>";
+            for (const c of row) out += `<td>${parseInline(c)}</td>`;
+            out += "</tr>";
+          }
+          out += "</tbody></table></div>";
+          return { html: out, next: j };
+        }
+
+        while (i < lines.length) {
+          const line = lines[i];
+
+          if (line.trim().startsWith("```")) {
+            if (!inCode) {
+              closeListsAndQuote();
+              inCode = true;
+              codeLang = line.replace("```", "").trim();
+              codeLines = [];
+            } else {
+              const cls = codeLang ? ` class="lang-${escapeHtml(codeLang)}"` : "";
+              html.push(
+                `<pre><code${cls}>${escapeHtml(codeLines.join("\n"))}</code></pre>`
+              );
+              inCode = false;
+              codeLang = "";
+              codeLines = [];
+            }
+            i++;
+            continue;
+          }
+
+          if (inCode) {
+            codeLines.push(line);
+            i++;
+            continue;
+          }
+
+          if (line.trim() === "") {
+            closeListsAndQuote();
+            i++;
+            continue;
+          }
+
+          if (line.trim() === "<details>") {
+            closeListsAndQuote();
+            const raw = [line];
+            i++;
+            while (i < lines.length) {
+              raw.push(lines[i]);
+              if (lines[i].trim() === "</details>") {
+                i++;
+                break;
+              }
+              i++;
+            }
+            html.push(raw.join("\n"));
+            continue;
+          }
+
+          if (isTableHeader(i)) {
+            closeListsAndQuote();
+            const table = parseTable(i);
+            html.push(table.html);
+            i = table.next;
+            continue;
+          }
+
+          const heading = line.match(/^(#{1,6})\s+(.*)$/);
+          if (heading) {
+            closeListsAndQuote();
+            const level = heading[1].length;
+            html.push(`<h${level}>${parseInline(heading[2])}</h${level}>`);
+            i++;
+            continue;
+          }
+
+          if (/^---+$/.test(line.trim())) {
+            closeListsAndQuote();
+            html.push("<hr>");
+            i++;
+            continue;
+          }
+
+          const quote = line.match(/^>\s?(.*)$/);
+          if (quote) {
+            if (!inQuote) {
+              closeListsAndQuote();
+              html.push("<blockquote>");
+              inQuote = true;
+            }
+            html.push(`<p>${parseInline(quote[1])}</p>`);
+            i++;
+            continue;
+          }
+
+          const ul = line.match(/^[-*]\s+(.*)$/);
+          if (ul) {
+            if (!inUl) {
+              closeListsAndQuote();
+              html.push("<ul>");
+              inUl = true;
+            }
+            html.push(`<li>${parseInline(ul[1])}</li>`);
+            i++;
+            continue;
+          }
+
+          const ol = line.match(/^\d+\.\s+(.*)$/);
+          if (ol) {
+            if (!inOl) {
+              closeListsAndQuote();
+              html.push("<ol>");
+              inOl = true;
+            }
+            html.push(`<li>${parseInline(ol[1])}</li>`);
+            i++;
+            continue;
+          }
+
+          closeListsAndQuote();
+          html.push(`<p>${parseInline(line)}</p>`);
+          i++;
+        }
+
+        closeListsAndQuote();
+        return html.join("\n");
+      }
+
+      function setMeta(name, content) {
+        const date = name.match(/\d{8}/)?.[0] ?? "-";
+        metaDateEl.textContent = `日期: ${date}`;
+        const words = content.replace(/\s+/g, "").length;
+        metaWordsEl.textContent = `字数: ${words}`;
+      }
+
+      async function loadReports() {
+        const res = await fetch("/api/reports");
+        const data = await res.json();
+        listEl.innerHTML = "";
+
+        if (!data.reports || data.reports.length === 0) {
+          const li = document.createElement("li");
+          li.className = "empty-item";
+          li.textContent = "暂无日报，请先生成一份。";
+          listEl.appendChild(li);
+          return;
+        }
+
+        for (const name of data.reports) {
+          const li = document.createElement("li");
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "report-btn";
+          btn.textContent = name;
+          btn.onclick = () => loadReport(name, btn);
+          li.appendChild(btn);
+          listEl.appendChild(li);
+        }
+
+        const first = data.reports[0];
+        const firstBtn = listEl.querySelector("button");
+        if (first && firstBtn) loadReport(first, firstBtn);
+      }
+
+      async function loadReport(name, clickedBtn) {
+        const res = await fetch(`/api/report?name=${encodeURIComponent(name)}`);
+        if (!res.ok) {
+          titleEl.textContent = "读取失败";
+          contentEl.innerHTML = `<p class="empty">无法读取 ${name}</p>`;
+          return;
+        }
+
+        const markdown = await res.text();
+        titleEl.textContent = name;
+        contentEl.innerHTML = parseMarkdown(markdown);
+        setMeta(name, markdown);
+
+        document.querySelectorAll(".report-btn").forEach((el) => {
+          el.classList.remove("active");
+        });
+        clickedBtn.classList.add("active");
+      }
+
+      refreshBtn.onclick = loadReports;
+      loadReports();
+    </script>
+  </body>
+</html>
