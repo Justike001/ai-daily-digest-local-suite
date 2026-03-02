@@ -1,2 +1,4 @@
 @echo off
-powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\justike.liu\ai-daily-digest\scripts\start-digest-viewer.ps1"
+setlocal
+set "REPO_DIR=%~dp0"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_DIR%scripts\start-digest-viewer.ps1"
