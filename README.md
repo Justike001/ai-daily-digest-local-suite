@@ -49,7 +49,7 @@ ai-daily-digest/
 ### 2) 手动生成一份日报
 
 ```powershell
-cd C:\Users\justike.liu\ai-daily-digest
+cd $HOME\ai-daily-digest
 bun scripts/digest.ts --hours 48 --top-n 15 --lang zh --output output/digest-$(Get-Date -Format yyyyMMdd).md
 ```
 
