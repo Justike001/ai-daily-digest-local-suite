@@ -68,3 +68,18 @@ git pull
 
 - 如果你用的是 `Link` 模式：到这里就完成了，Codex 自动使用最新内容。
 - 如果你用的是 `Copy` 模式：再执行一次安装命令覆盖到 Codex 目录。
+
+## Optional: Register Daily 09:00 Task
+
+克隆后可直接注册日报定时任务，不需要改本机用户名路径：
+
+```powershell
+cd $HOME\ai-daily-digest
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\register-digest-task.ps1
+```
+
+自定义任务名和时间（24 小时制 `HH:mm`）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\register-digest-task.ps1 -TaskName "AI-Digest-Work" -DailyAt "08:30"
+```

@@ -1,24 +1,46 @@
+[CmdletBinding()]
+param(
+  [string]$TaskName = "AI-Daily-Digest-9AM",
+  [ValidatePattern('^\d{2}:\d{2}$')]
+  [string]$DailyAt = "09:00"
+)
+
 $ErrorActionPreference = "Stop"
 
-$taskName = "AI-Daily-Digest-9AM"
-$scriptPath = "C:\Users\justike.liu\ai-daily-digest\scripts\run-digest-daily.ps1"
+$scriptPath = Join-Path $PSScriptRoot "run-digest-daily.ps1"
+if (-not (Test-Path $scriptPath)) {
+  throw "run-digest-daily.ps1 not found: $scriptPath"
+}
+
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$timeOfDay = [TimeSpan]::ParseExact($DailyAt, 'hh\:mm', $null)
+$triggerAt = [DateTime]::Today.Add($timeOfDay)
+
+$powerShellExe = (Get-Command "powershell.exe" -ErrorAction SilentlyContinue).Source
+if (-not $powerShellExe) {
+  $powerShellExe = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+}
 
 $action = New-ScheduledTaskAction `
-  -Execute "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" `
-  -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+  -Execute $powerShellExe `
+  -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`"" `
+  -WorkingDirectory $repoRoot
 
-$trigger = New-ScheduledTaskTrigger -Daily -At 9:00AM
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable
+$trigger = New-ScheduledTaskTrigger -Daily -At $triggerAt
+$settings = New-ScheduledTaskSettingsSet `
+  -StartWhenAvailable `
+  -AllowStartIfOnBatteries `
+  -DontStopIfGoingOnBatteries
 
-if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
-  Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+  Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
 Register-ScheduledTask `
-  -TaskName $taskName `
+  -TaskName $TaskName `
   -Action $action `
   -Trigger $trigger `
   -Settings $settings `
-  -Description "Generate AI Daily Digest every day at 09:00"
+  -Description "Generate AI Daily Digest every day at $DailyAt"
 
-Get-ScheduledTask -TaskName $taskName | Select-Object TaskName, State
+Get-ScheduledTask -TaskName $TaskName | Select-Object TaskName, State
