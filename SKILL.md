@@ -1,6 +1,6 @@
 ﻿---
 name: ai-daily-digest
-description: "Fetches RSS feeds from 90 top Hacker News blogs (curated by Karpathy), uses AI to score and filter articles, and generates a daily digest in Markdown with Chinese-translated titles, category grouping, trend highlights, and visual statistics (Mermaid charts + tag cloud). Use when user mentions 'daily digest', 'RSS digest', 'blog digest', 'AI blogs', 'tech news summary', or asks to run /digest command. Trigger command: /digest."
+description: "Fetches RSS feeds from 90 top Hacker News blogs (curated by Karpathy), uses AI to score and filter articles, and generates a daily digest in Markdown with Chinese-translated titles, category grouping, trend highlights, and visual statistics (Mermaid charts + tag cloud). Use when user mentions 'daily digest', 'RSS digest', 'blog digest', 'AI blogs', 'tech news summary', or asks to run /digest command. Trigger command: /digest. Also trigger on semantic intents like '我要查看今日AI日报', '查看今日AI日报', '今天AI日报', and equivalent Chinese phrasing; for view/open intents, directly start the local digest viewer."
 ---
 
 # AI Daily Digest
@@ -239,5 +239,63 @@ EOF
 ### "No articles found in time range"
 尝试扩大时间范围（如从 24 小时改为 48 小时）。
 
+
+
+
+---
+
+## 本地流程补充（仓库路径优先）
+
+以下内容是对原流程的补充，不替代原有 `/digest` 交互与配置逻辑。
+
+### 语义触发补充
+
+当用户表达以下语义时，也要触发本 skill：
+
+- “我要查看今日AI日报”
+- “查看今日AI日报”
+- “今天AI日报”
+- “打开AI日报”
+- “给我今天的 AI 日报”
+- 其他等价表达
+
+### 本地项目优先流程（查看今日）
+
+1. 先确定 `REPO_DIR`：
+`REPO_DIR` 取 skill 所在目录（`SKILL_DIR`，即 Codex 安装后的 `.../skills/ai-daily-digest`）。
+2. 目标文件：`REPO_DIR/output/digest-<yyyyMMdd>.md`
+3. 若今日文件存在：直接返回路径，并直接启动阅读站
+4. 若今日文件不存在：使用默认参数生成后，再直接启动阅读站并返回结果
+
+默认生成参数：
+
+- `--hours 48`
+- `--top-n 15`
+- `--lang zh`
+
+示例命令（PowerShell）：
+
+```powershell
+$repoDir = "<REPO_DIR>"
+Set-Location $repoDir
+$today = Get-Date -Format yyyyMMdd
+bun scripts/digest.ts --hours 48 --top-n 15 --lang zh --output output/digest-$today.md
+```
+
+### API Key 补充
+
+本地套件主路径使用 `KIMI_API_KEY`；若需兜底可配 `OPENAI_API_KEY`（可选 `OPENAI_API_BASE` / `OPENAI_MODEL`）。
+
+### 阅读站补充（查看类请求默认直接启动）
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-digest-viewer.ps1
+```
+
+访问地址：`http://localhost:8787`
+
+执行规则：当语义属于“查看/打开今日AI日报”时，无需二次确认，直接执行上面的启动命令。
+
+安装建议：在新机器上优先把整个仓库安装到 Codex 的 `skills/ai-daily-digest`（链接或复制），避免只拷贝 `SKILL.md` 导致脚本缺失。
 
 
